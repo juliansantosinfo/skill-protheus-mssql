@@ -65,9 +65,6 @@ python scripts/mssql_exec.py --container totvs_mssql ping
 ```
 
 ## Resolução de Configuração
-O executor busca credenciais na seguinte ordem:
-1. Parâmetro explícito `--env-file`
-2. `.env` no diretório de execução atual
-3. Arquivo `.env` em `mssql-connections/`
-4. `.env` na raiz da skill
-5. Variáveis de ambiente do sistema (`MSSQL_*`)
+O executor utiliza o arquivo `.env` localizado na raiz do projeto em execução (`cwd`):
+1. Procura `.env` na raiz do projeto (`Path.cwd() / ".env"`) ou argumento explícito `--env-file`.
+2. Se o `.env` não existir ou faltar qualquer uma das variáveis obrigatórias (`MSSQL_HOST`, `MSSQL_DATABASE`, `MSSQL_USER`, `MSSQL_PASSWORD`), o executor retorna erro imediato indicando o que falta, orientando a solicitar os dados ao usuário.

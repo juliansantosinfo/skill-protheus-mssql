@@ -42,40 +42,38 @@ def parse_env_file(file_path):
 
 
 def resolve_config(env_file_arg=None):
-    """Resolve configurações combinando arquivos .env e variáveis de ambiente."""
-    env_data = {}
-    found_env_path = None
-
-    # Ordem de busca de arquivo .env:
-    # 1. Argumento explícito --env-file
-    # 2. .env no diretório de trabalho atual (cwd)
-    # 3. Arquivo em mssql-connections/ da skill
-    # 4. .env na raiz da skill
-    candidates = []
+    """Resolve configurações usando exclusivamente o arquivo .env na raiz do projeto (cwd)."""
     if env_file_arg:
-        candidates.append(Path(env_file_arg).expanduser().resolve())
+        target_env = Path(env_file_arg).expanduser().resolve()
     else:
-        candidates.append(Path.cwd() / ".env")
-        conn_dir = SKILL_ROOT / "mssql-connections"
-        if conn_dir.is_dir():
-            candidates.extend(sorted(conn_dir.glob("*.env")))
-        candidates.append(SKILL_ROOT / ".env")
+        target_env = Path.cwd() / ".env"
 
-    for cand in candidates:
-        if cand.is_file():
-            env_data = parse_env_file(cand)
-            found_env_path = cand
-            break
+    if not target_env.is_file():
+        raise ValueError(
+            f"Arquivo .env não encontrado na raiz do projeto ({target_env}). "
+            "Solicite ao usuário os dados de conexão (MSSQL_HOST, MSSQL_DATABASE, MSSQL_USER, MSSQL_PASSWORD) "
+            "e crie o arquivo .env antes de executar."
+        )
+
+    env_data = parse_env_file(target_env)
 
     def get_val(key, default=""):
-        # Variáveis do sistema têm precedência se existirem, senão arquivo .env, senão default
         return os.environ.get(key, env_data.get(key, default))
 
-    host = get_val("MSSQL_HOST", "127.0.0.1")
+    # Validação obrigatória de credenciais
+    required_keys = ["MSSQL_HOST", "MSSQL_DATABASE", "MSSQL_USER", "MSSQL_PASSWORD"]
+    missing = [k for k in required_keys if not get_val(k)]
+    if missing:
+        raise ValueError(
+            f"Arquivo .env ({target_env}) incompleto. Variáveis ausentes: {', '.join(missing)}. "
+            "Solicite esses valores ao usuário e atualize o .env antes de continuar."
+        )
+
+    host = get_val("MSSQL_HOST")
     port = int(get_val("MSSQL_PORT", "1433"))
-    database = get_val("MSSQL_DATABASE", "protheus")
-    user = get_val("MSSQL_USER", "sa")
-    password = get_val("MSSQL_PASSWORD", "")
+    database = get_val("MSSQL_DATABASE")
+    user = get_val("MSSQL_USER")
+    password = get_val("MSSQL_PASSWORD")
     client = get_val("MSSQL_CLIENT", "auto").lower()
     container = get_val("MSSQL_DOCKER_CONTAINER", "")
     timeout = int(get_val("MSSQL_COMMAND_TIMEOUT", "30"))
@@ -95,8 +93,9 @@ def resolve_config(env_file_arg=None):
         "trust_cert": trust_cert,
         "encrypt": encrypt,
         "sqlcmd_path": sqlcmd_path,
-        "env_path": str(found_env_path) if found_env_path else None,
+        "env_path": str(target_env),
     }
+
 
 
 def find_docker_container(preferred=""):
@@ -532,32 +531,35 @@ def cmd_execute(args, cfg):
 
 
 def main():
-    base_parser = argparse.ArgumentParser(add_help=False)
-    base_parser.add_argument("--env-file", help="Caminho explícito para arquivo de conexão .env")
-    base_parser.add_argument("--client", choices=["auto", "docker", "sqlcmd", "python"], help="Forçar backend de execução")
-    base_parser.add_argument("--container", help="Nome do container Docker do SQL Server (padrão: totvs_mssql ou autodetect)")
-    base_parser.add_argument("--format", choices=["json", "table", "raw"], default="json", help="Formato de saída (padrão: json)")
+    sub_base_parser = argparse.ArgumentParser(add_help=False)
+    sub_base_parser.add_argument("--env-file", default=argparse.SUPPRESS, help="Caminho explícito para arquivo de conexão .env")
+    sub_base_parser.add_argument("--client", choices=["auto", "docker", "sqlcmd", "python"], default=argparse.SUPPRESS, help="Forçar backend de execução")
+    sub_base_parser.add_argument("--container", default=argparse.SUPPRESS, help="Nome do container Docker do SQL Server (padrão: totvs_mssql ou autodetect)")
+    sub_base_parser.add_argument("--format", choices=["json", "table", "raw"], default=argparse.SUPPRESS, help="Formato de saída (padrão: json)")
 
     parser = argparse.ArgumentParser(
         description="Executor MSSQL zero-dependências para TOTVS Protheus.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        parents=[base_parser],
     )
+    parser.add_argument("--env-file", default=None, help="Caminho explícito para arquivo de conexão .env")
+    parser.add_argument("--client", choices=["auto", "docker", "sqlcmd", "python"], default=None, help="Forçar backend de execução")
+    parser.add_argument("--container", default=None, help="Nome do container Docker do SQL Server (padrão: totvs_mssql ou autodetect)")
+    parser.add_argument("--format", choices=["json", "table", "raw"], default="json", help="Formato de saída (padrão: json)")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # Subcomando: ping
-    subparsers.add_parser("ping", parents=[base_parser], help="Testa conectividade e valida metadados do banco")
+    subparsers.add_parser("ping", parents=[sub_base_parser], help="Testa conectividade e valida metadados do banco")
 
     # Subcomando: query
-    p_query = subparsers.add_parser("query", parents=[base_parser], help="Executa consulta SELECT de leitura")
+    p_query = subparsers.add_parser("query", parents=[sub_base_parser], help="Executa consulta SELECT de leitura")
     g_query = p_query.add_mutually_exclusive_group(required=True)
     g_query.add_argument("--sql", help="Comando SQL direto")
     g_query.add_argument("--file", help="Caminho para arquivo .sql")
-    p_query.add_argument("--limit", type=int, default=100, help="Limite máximo de linhas (padrão: 100)")
+    p_query.add_argument("--limit", type=int, default=10, help="Limite máximo de linhas (padrão: 10)")
 
     # Subcomando: execute
-    p_exec = subparsers.add_parser("execute", parents=[base_parser], help="Executa comando SQL (DML/DDL) com proteção transacional")
+    p_exec = subparsers.add_parser("execute", parents=[sub_base_parser], help="Executa comando SQL (DML/DDL) com proteção transacional")
     g_exec = p_exec.add_mutually_exclusive_group(required=True)
     g_exec.add_argument("--sql", help="Comando SQL direto")
     g_exec.add_argument("--file", help="Caminho para arquivo .sql")
