@@ -1,43 +1,73 @@
 # protheus-mssql
 
-Skill especializada para leitura, diagnóstico e orientação de manutenção do TOTVS Protheus em Microsoft SQL Server, para agentes que auxiliam desenvolvedores ADVPL/TLPP.
+Skill autossuficiente e especializada para leitura, diagnóstico e execução de comandos SQL em bancos Microsoft SQL Server utilizados pelo TOTVS Protheus ERP, para agentes e desenvolvedores ADVPL/TLPP.
 
-## Dependência
-Instale a skill `mssql-database` ao lado desta. Ela mantém autenticação (`MSSQL_*`), ordem dos arquivos `.env`, seleção de `sqlcmd`/`pyodbc` e execução T-SQL. **Esta skill não inclui conexão própria e não armazena segredos.**
+## Destaques
+- **Zero Dependências Externas:** Utiliza 100% biblioteca padrão do Python 3 (`scripts/mssql_exec.py`). Sem necessidade de instalar `python-dotenv`, `sqlparse` ou `pyodbc`.
+- **Suporte Nativo a Docker:** Conecta e executa comandos diretamente via containers Docker (ex.: `totvs_mssql`), sem exigir instalação de drivers ou `sqlcmd` no host.
+- **Detecção Automática:** Suporta Docker, `sqlcmd` local do host ou drivers Python instalados.
+- **Segurança Protheus Integrada:** Comandos de escrita por padrão rodam em modo PREVIEW (simulação transacional com ROLLBACK) e avisam sobre impacto em regras de negócio e dicionários do ERP.
 
+## Estrutura da Skill
 ```text
-.agents/skills/
-  mssql-database/
-    SKILL.md
-    scripts/mssql_tool.py
-    .env        # opcional; fallback conforme a skill base
-  protheus-mssql/
-    SKILL.md
-    references/
-    examples/
+skill-protheus-mssql/
+  SKILL.md                       # Instruções principais da skill
+  README.md                      # Documentação de uso
+  .env.example                   # Exemplo de configuração de conexão
+  scripts/
+    mssql_exec.py                # Executor nativo e autossuficiente
+  examples/
+    01_context.sql               # Identificação do ambiente
+    02_find_physical_tables.sql  # Descoberta de tabelas físicas
+    03_columns.sql               # Inspeção de colunas e tipos
+  references/
+    DICTIONARY.md                # Diretrizes de catálogo de dicionário SX
+    QUERY_RULES.md               # Regras de filial, D_E_L_E_T_ e joins
+    WRITES.md                    # Boas práticas para manutenção de dados
+    EXTENDING.md                 # Especializações futuras
+  mssql-connections/             # Arquivos .env de conexões configuradas
+  protheus-connections/          # Documentação contextual de ambientes mapeados
 ```
 
-## Configuração
-A prioridade do `.env` pertence à skill base: `--env-file` explícito > `.env` do diretório atual de execução > `.env` da raiz de `mssql-database`. Em ambiente com várias instâncias, prefira sempre `--env-file` explícito.
+## Como Usar
 
-Exemplos:
+### 1. Testar Conexão (Ping)
 ```bash
-python .agents/skills/mssql-database/scripts/mssql_tool.py --env-file ./conexoes/protheus-hml.env ping
-python .agents/skills/mssql-database/scripts/mssql_tool.py --env-file ./conexoes/protheus-hml.env query --sql "SELECT DB_NAME() AS database_name"
+python scripts/mssql_exec.py ping
+python scripts/mssql_exec.py ping --format table
 ```
-O executor efetivo da skill base deve ser conferido com `--help` para argumentos que variem entre versões.
 
-## Objetivos
-- Encontrar schema e nome físico das tabelas associadas aos aliases lógicos.
-- Validar colunas/tipos/índices reais no SQL Server e regras de filial/exclusão.
-- Consultar dicionários SX quando estiverem acessíveis, ou orientar extração via AppServer/SIGACFG.
-- Investigar registros e gerar SQL/TLPP/ADVPL apoiado em metadados reais.
-- Orientar inclusão/atualização **pelo ERP**; por padrão, nunca gravar diretamente em tabelas Protheus via SQL.
+### 2. Consultas de Leitura (Query)
+```bash
+# Query direta via SQL
+python scripts/mssql_exec.py query --sql "SELECT TOP 10 name FROM sys.tables"
 
-## Uso típico com agente
-> Use a skill protheus-mssql e a mssql-database no ambiente de homologação para descobrir as tabelas físicas SC5/SC6, validar campos e preparar uma consulta de pedidos por filial. Não faça alterações.
+# Query a partir de arquivo .sql
+python scripts/mssql_exec.py query --file examples/01_context.sql
 
-> Preciso cadastrar registros no Protheus. Investigue o dicionário e a rotina oficial e proponha uma implementação ADVPL/TLPP segura com validações, homologação e plano de reversão.
+# Saída formatada em tabela
+python scripts/mssql_exec.py query --file examples/02_find_physical_tables.sql --format table
+```
 
-## Limitações
-O pacote não identifica um ambiente real sozinho: exige credenciais, ferramentas do host e acesso ao SQL Server. Algumas SX não estarão disponíveis como tabelas SQL. Nenhuma escrita Protheus via SQL bruto está autorizada pela skill. Exemplos SQL são ponto de partida e devem ser ajustados/validados. Sem testes de integração contra ERP real.
+### 3. Execução de Comandos (Execute)
+```bash
+# Modo PREVIEW (simulação transacional com ROLLBACK automático)
+python scripts/mssql_exec.py execute --sql "UPDATE SA1990 SET A1_NOME = 'Teste' WHERE A1_COD = '000001'"
+
+# Modo PERSISTED (somente com confirmação explícita)
+python scripts/mssql_exec.py execute --sql "UPDATE SA1990 SET A1_NOME = 'Teste' WHERE A1_COD = '000001'" --apply --ack confirmed
+```
+
+### 4. Conexões Específicas
+```bash
+python scripts/mssql_exec.py --env-file ./mssql-connections/totvs_mssql__protheus.env ping
+python scripts/mssql_exec.py --container totvs_mssql ping
+```
+
+## Resolução de Configuração
+O executor busca credenciais na seguinte ordem:
+1. Parâmetro explícito `--env-file`
+2. `.env` no diretório de execução atual
+3. Arquivo `.env` em `mssql-connections/`
+4. `.env` na raiz da skill
+5. Variáveis de ambiente do sistema (`MSSQL_*`)

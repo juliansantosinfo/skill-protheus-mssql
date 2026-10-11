@@ -15,11 +15,11 @@
 
 ## 2. Referência de Conexão
 
-- **Arquivo `.env` Correspondente:** `./mssql-connections/totvs_mssql__protheus.env` (origem: `/home/julian/.gemini/config/skills/skill-mssql-database/mssql-connections/totvs_mssql__protheus.env`)
+- **Arquivo `.env` Correspondente:** `./mssql-connections/totvs_mssql__protheus.env`
 - **Host / Porta:** `127.0.0.1:1433`
 - **Usuário Conectado:** `sa` (Funções: `sysadmin`, `db_owner`)
-- **Segurança:** Credenciais omitidas por política de segurança. Não expor senhas em artefatos ou logs.
-- **Observação de Transporte:** O serviço SQL Server executa em container Docker (`totvs_mssql`). A execução via `mssql_tool.py` utiliza o cliente `sqlcmd` com certificado confiado (`-C`) devido ao certificado TLS autoassinado padrão de container.
+- **Segurança:** Credenciais protegidas por política de segurança. Não expor senhas em artefatos ou logs.
+- **Observação de Transporte:** O serviço SQL Server executa em container Docker (`totvs_mssql`). A execução via `scripts/mssql_exec.py` conecta nativamente via Docker ou `sqlcmd` com certificado confiado (`-C`).
 
 ## 3. Evidências que Confirmam o Ambiente Protheus
 
@@ -120,10 +120,10 @@ Todos os principais dicionários estão residentes como tabelas físicas no SQL 
 > - Nunca executar `INSERT`, `UPDATE`, `DELETE` ou `TRUNCATE` diretamente via SQL em tabelas de negócio (`SA*`, `SB*`, `SC*`, `SD*`, `SE*`, etc.) ou dicionários (`SX*`, `SIX`).
 > - A escrita direta contorna validações do `SX3`, integridade do MVC, gatilhos de aplicação (`SX7`), pontos de entrada (`PARAMIXB`), controle de concorrência (`RecLock`), auditoria (`SYS_AUDIT`) e o mecanismo de numeração sequencial.
 > - Toda escrita deve ser direcionada para ADVPL/TLPP via rotinas oficiais (`MsExecAuto`, Classes de Modelo MVC, `FWFormModel`, `RecLock()` ou APIs REST TTALK).
-> - Tabelas comprovadamente externas ou staging (ex.: tabelas auxiliares fora do padrão Protheus) exigem aprovação humana explícita prévia e transação com simulação de rollback conforme a skill `mssql-database`.
+> - Tabelas comprovadamente externas ou staging (ex.: tabelas auxiliares fora do padrão Protheus) exigem aprovação humana explícita prévia e transação com simulação de rollback via `scripts/mssql_exec.py execute`.
 
 ## 9. Limitações e Pendências
 
 1. **Numeração Automática (SXE/SXF):** Não reside em tabelas SQL Server. Intervenções em numeração dependem do AppServer ou rotinas padrão do ERP.
-2. **Configuração de Execução do `sqlcmd`:** O ambiente executa dentro do container `totvs_mssql`. No host Linux, a execução via `mssql_tool.py` deve utilizar `MSSQL_SQLCMD_PATH` apontando para o wrapper do container ou dispor de `pyodbc` instalado com driver ODBC 18.
+2. **Configuração de Execução:** O ambiente executa dentro do container `totvs_mssql`. O executor `scripts/mssql_exec.py` gerencia automaticamente a execução direta via Docker sem requerer drivers no host.
 3. **Escopo de Dados:** Ambiente de testes/desenvolvimento montado na Empresa `99` e Filial `01`.
